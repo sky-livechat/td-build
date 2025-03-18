@@ -1,0 +1,82 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - "release/v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ${{ matrix.runner || 'ubuntu-latest' }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-20.04
+            runner: ubuntu-20.04
+          - os: ubuntu-22.04
+            runner: ubuntu-22.04
+          - os: ubuntu-24.04
+            runner: ubuntu-24.04
+          - os: alpine-3.16.2
+            runner: ubuntu-latest
+            container: alpine:3.16.2
+
+    container: ${{ matrix.container }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          if [ "${{ matrix.os }}" = "alpine-3.16.2" ]; then
+            apk update
+            apk upgrade
+            apk add alpine-sdk linux-headers git zlib-dev openssl-dev gperf php cmake zip
+          else
+            sudo apt-get update
+            sudo apt-get upgrade
+            sudo apt-get install make git zlib1g-dev libssl-dev gperf php-cli cmake g++
+          fi
+
+      - name: Build project
+        run: |
+          mkdir -p build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX:PATH=../tdlib ..
+          cmake --build . --target install
+
+      - name: Create ZIP archive
+        run: |
+          zip -r td_${{ matrix.os }}.zip tdlib
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: td_${{ matrix.os }}
+          path: td_${{ matrix.os }}.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          artifacts: "artifacts/td_*/*.zip"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: false
+          prerelease: false
